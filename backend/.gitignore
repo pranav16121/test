@@ -1,0 +1,19 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.venv/
+venv/
+ENV/
+env/
+
+# SQLite databases
+*.db
+*.db-journal
+
+# Uploaded media (local testing)
+static/uploads/*
+!static/uploads/.gitkeep
