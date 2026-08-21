@@ -1,36 +1,14 @@
-import datetime
+import json
 import os
-from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
-from dotenv import load_dotenv
-from supabase import Client, create_client
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 
 # ============================================================
-# LOAD CONFIGURATION
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-for env_path in [
-    BASE_DIR / "backend" / ".env",
-    BASE_DIR / ".env",
-    BASE_DIR.parent / "backend" / ".env",
-    BASE_DIR.parent / ".env",
-    Path.cwd() / "backend" / ".env",
-    Path.cwd() / ".env",
-]:
-    if env_path.is_file():
-        load_dotenv(env_path)
-
-load_dotenv()  # Fallback: search parent directories
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-
-# ============================================================
-# LOST & FOUND - FRONTEND (DIRECT SUPABASE INTEGRATION)
+# LOST & FOUND - FRONTEND
 # Tkinter UI
 # ============================================================
 
@@ -54,6 +32,7 @@ class LostFoundApp(tk.Tk):
         self.minsize(900, 620)
         self.configure(bg=self.BG)
 
+        self.backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
         self.error_text = tk.StringVar(value="")
         self.items = []
 
@@ -62,16 +41,6 @@ class LostFoundApp(tk.Tk):
 
         self.item_name = tk.StringVar()
         self.location = tk.StringVar()
-
-        # Initialize direct Supabase client
-        self.supabase: Client | None = None
-        if SUPABASE_URL and SUPABASE_KEY:
-            try:
-                self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            except Exception as exc:
-                self.error_text.set(f"Supabase connection failed: {exc}")
-        else:
-            self.error_text.set("Missing SUPABASE_URL or SUPABASE_KEY in backend/.env")
 
         self.setup_styles()
         self.create_ui()
@@ -589,55 +558,6 @@ class LostFoundApp(tk.Tk):
             )
 
     # ========================================================
-    # SUPABASE DATABASE OPERATIONS
-    # ========================================================
-
-    def _db_fetch_items(self, query=None):
-        if not self.supabase:
-            raise RuntimeError("Supabase client is not initialized. Please verify backend/.env.")
-
-        req = self.supabase.table("lost_found_items").select("*").order("created_at", desc=True)
-        if query and query.strip():
-            query_clean = query.strip().replace(",", "")
-            req = req.or_(
-                f"title.ilike.%{query_clean}%,description.ilike.%{query_clean}%,location.ilike.%{query_clean}%,category.ilike.%{query_clean}%"
-            )
-        response = req.execute()
-        return response.data or []
-
-    def _db_create_item(self, item_type, title, description, location):
-        if not self.supabase:
-            raise RuntimeError("Supabase client is not initialized. Please verify backend/.env.")
-
-        data = {
-            "type": item_type.strip().lower(),
-            "title": title.strip(),
-            "description": description.strip() if description else "",
-            "location": location.strip(),
-            "category": "General",
-            "date": str(datetime.date.today()),
-            "contact_email": "anonymous@lostfound.local",
-            "status": "active",
-        }
-        response = self.supabase.table("lost_found_items").insert(data).execute()
-        if not response.data:
-            raise RuntimeError("Supabase did not return the created item.")
-        return response.data[0]
-
-    def _db_update_item_status(self, item_id, status_str):
-        if not self.supabase:
-            raise RuntimeError("Supabase client is not initialized. Please verify backend/.env.")
-
-        status_val = "resolved" if status_str.strip().lower() == "returned" else status_str.strip().lower()
-        response = (
-            self.supabase.table("lost_found_items")
-            .update({"status": status_val})
-            .eq("id", int(item_id))
-            .execute()
-        )
-        return response.data[0] if response.data else None
-
-    # ========================================================
     # SUBMIT ITEM
     # ========================================================
 
@@ -670,18 +590,23 @@ class LostFoundApp(tk.Tk):
             return
 
         try:
-            self._db_create_item(
-                item_type=self.selected_type.get(),
-                title=name,
-                description=description,
-                location=location
+            self._api_request(
+                "POST",
+                "/items/",
+                {
+                    "type": self.selected_type.get(),
+                    "name": name,
+                    "description": description,
+                    "location": location
+                }
             )
             self._clear_error()
-        except Exception as exc:
-            self._set_backend_error(f"Error saving item: {exc}")
+        except RuntimeError as exc:
+            self._set_backend_error(str(exc))
             return
 
         # Clear form
+
         self.item_name.set("")
         self.location.set("")
 
@@ -708,13 +633,16 @@ class LostFoundApp(tk.Tk):
             self.table.delete(row)
 
         query = self.search_text.get().strip()
+        path = "/items/"
+        if query:
+            path += f"?query={quote(query)}"
 
         try:
-            self.items = self._db_fetch_items(query)
+            self.items = self._api_request("GET", path)
             self._clear_error()
-        except Exception as exc:
+        except RuntimeError as exc:
             self.items = []
-            self._set_backend_error(f"Database error: {exc}")
+            self._set_backend_error(str(exc))
             return
 
         for item in self.items:
@@ -727,7 +655,7 @@ class LostFoundApp(tk.Tk):
                 "end",
                 iid=str(item_id),
                 values=(
-                    str(item.get("type", "")).capitalize(),
+                    item.get("type", ""),
                     item.get("name") or item.get("title", ""),
                     item.get("location", ""),
                     self._format_item_status(item.get("status", ""))
@@ -754,10 +682,14 @@ class LostFoundApp(tk.Tk):
         item_id = selected[0]
 
         try:
-            self._db_update_item_status(item_id, "Returned")
+            self._api_request(
+                "PATCH",
+                f"/items/{item_id}/status",
+                {"status": "Returned"}
+            )
             self._clear_error()
-        except Exception as exc:
-            self._set_backend_error(f"Error updating item: {exc}")
+        except RuntimeError as exc:
+            self._set_backend_error(str(exc))
             return
 
         self.refresh_items()
@@ -767,15 +699,41 @@ class LostFoundApp(tk.Tk):
             "Item marked as returned."
         )
 
+    def _api_request(self, method, path, payload=None):
+
+        url = f"{self.backend_url.rstrip('/')}{path}"
+        headers = {"Content-Type": "application/json"}
+        data = None
+
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+
+        request = Request(url, data=data, method=method, headers=headers)
+
+        try:
+            with urlopen(request, timeout=8) as response:
+                content = response.read().decode("utf-8")
+                return json.loads(content) if content else None
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8")
+            raise RuntimeError(f"Backend error ({exc.code}): {detail or 'request failed'}")
+        except (URLError, TimeoutError):
+            raise RuntimeError(
+                "Backend is unavailable. Start the FastAPI server at "
+                "http://127.0.0.1:8000 and try again."
+            )
+
     def _set_backend_error(self, message):
         self.error_text.set(message)
 
     def _clear_error(self):
         self.error_text.set("")
 
-    def _format_item_status(self, item_status):
-        status_value = str(item_status).strip().lower()
-        if status_value in {"resolved", "returned"}:
+    def _format_item_status(self, status):
+        status_value = str(status).strip().lower()
+        if not status_value:
+            return ""
+        if status_value == "resolved":
             return "Returned"
         return status_value.capitalize()
 
