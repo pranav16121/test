@@ -1,7 +1,5 @@
 fastapi
 uvicorn[standard]
 supabase
-cloudinary
 python-dotenv
-python-multipart
 httpx
