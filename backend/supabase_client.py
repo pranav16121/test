@@ -7,7 +7,7 @@ from supabase import Client, create_client
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
-load_dotenv()
+load_dotenv(BASE_DIR.parent / ".env")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")

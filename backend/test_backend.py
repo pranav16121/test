@@ -39,7 +39,7 @@ class TestLostAndFoundBackend(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         body = response.json()
         self.assertEqual(body["name"], "Wallet")
-        self.assertEqual(body["status"], "active")
+        self.assertEqual(body["status"], "Active")
 
     @patch("backend.main.items.fetch_items")
     def test_retrieve_items(self, mock_fetch_items):
@@ -85,7 +85,7 @@ class TestLostAndFoundBackend(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["status"], "resolved")
+        self.assertEqual(body["status"], "Returned")
 
 
 if __name__ == "__main__":

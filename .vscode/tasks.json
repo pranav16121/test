@@ -1,0 +1,40 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start FastAPI Backend",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "uvicorn",
+                "backend.main:app",
+                "--reload"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "Start Tkinter Frontend",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "frontend/Frontend.py"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        }
+    ]
+}
