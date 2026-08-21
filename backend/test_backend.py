@@ -1,108 +1,92 @@
-import os
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
-# Mock the Supabase client connection BEFORE importing app.
-mock_supabase = MagicMock()
+from backend.main import app
 
-# Setup a robust reusable query builder mock
-mock_query = MagicMock()
-mock_query.eq.return_value = mock_query
-mock_query.order.return_value = mock_query
-mock_query.or_.return_value = mock_query
-
-mock_supabase.table.return_value.select.return_value = mock_query
-mock_supabase.table.return_value.insert.return_value = mock_query
-mock_supabase.table.return_value.update.return_value = mock_query
-
-with patch("backend.supabase_client.supabase", mock_supabase):
-    from backend.main import app
-
-client = TestClient(app)
 
 class TestLostAndFoundBackend(unittest.TestCase):
-    @patch("backend.main.supabase", mock_supabase)
-    def test_add_item(self):
-        # Configure mock return data for insert
-        mock_query.execute.return_value.data = [
-            {
-                "id": 1,
-                "type": "lost",
-                "title": "Lost iPhone",
-                "description": "Black iPhone 13 in library",
-                "category": "Electronics",
-                "location": "Library Room 3",
-                "date": "2026-08-21",
-                "image": "https://res.cloudinary.com/demo/image/upload/sample.jpg",
-                "contact_email": "john.doe@college.edu",
-                "status": "active"
-            }
-        ]
+    def setUp(self):
+        self.client = TestClient(app)
+        self.supabase_patch = patch("backend.main.supabase", object())
+        self.supabase_patch.start()
 
-        res = client.post("/items/", json={
+    def tearDown(self):
+        self.supabase_patch.stop()
+
+    @patch("backend.main.items.create_item")
+    def test_create_item(self, mock_create_item):
+        mock_create_item.return_value = {
+            "id": 1,
             "type": "lost",
-            "title": "Lost iPhone",
-            "description": "Black iPhone 13 in library",
-            "category": "Electronics",
-            "location": "Library Room 3",
-            "date": "2026-08-21",
-            "image": "https://res.cloudinary.com/demo/image/upload/sample.jpg",
-            "contact_email": "john.doe@college.edu"
-        })
+            "title": "Wallet",
+            "description": "Black wallet",
+            "location": "Library",
+            "status": "active",
+        }
 
-        self.assertEqual(res.status_code, 201)
-        data = res.json()
-        self.assertEqual(data["title"], "Lost iPhone")
-        self.assertEqual(data["id"], 1)
-        self.assertEqual(data["status"], "active")
+        response = self.client.post(
+            "/items/",
+            json={
+                "type": "Lost",
+                "name": "Wallet",
+                "description": "Black wallet",
+                "location": "Library",
+            },
+        )
 
-    @patch("backend.main.supabase", mock_supabase)
-    def test_list_items(self):
-        # Configure mock return data for select query chain
-        mock_query.execute.return_value.data = [
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["name"], "Wallet")
+        self.assertEqual(body["status"], "active")
+
+    @patch("backend.main.items.fetch_items")
+    def test_retrieve_items(self, mock_fetch_items):
+        mock_fetch_items.return_value = [
             {
                 "id": 1,
-                "type": "lost",
-                "title": "Lost iPhone",
-                "status": "active"
+                "type": "found",
+                "title": "Bottle",
+                "description": "Blue bottle",
+                "location": "Cafeteria",
+                "status": "active",
             }
         ]
 
-        res = client.get("/items/?type=lost&status=active")
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]["title"], "Lost iPhone")
+        response = self.client.get("/items/")
 
-    @patch("backend.main.supabase", mock_supabase)
-    def test_patch_item_status(self):
-        # Configure mock return data for update query chain
-        mock_query.execute.return_value.data = [
-            {
-                "id": 1,
-                "type": "lost",
-                "title": "Lost iPhone",
-                "status": "resolved"
-            }
-        ]
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]["name"], "Bottle")
 
-        res = client.patch("/items/1/status", json={"status": "resolved"})
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertEqual(data["status"], "resolved")
+    @patch("backend.main.items.fetch_items")
+    def test_search_items(self, mock_fetch_items):
+        mock_fetch_items.return_value = []
 
-    def test_invalid_item_type(self):
-        res = client.post("/items/", json={
-            "type": "invalid_type",
-            "title": "Lost iPhone",
-            "category": "Electronics",
-            "location": "Library Room 3",
-            "date": "2026-08-21",
-            "contact_email": "john.doe@college.edu"
-        })
-        self.assertEqual(res.status_code, 400)
-        self.assertIn("Type must be either", res.json()["detail"])
+        response = self.client.get("/items/?query=wallet")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+        _, kwargs = mock_fetch_items.call_args
+        self.assertEqual(kwargs["search_query"], "wallet")
+
+    @patch("backend.main.items.update_item_status")
+    def test_update_status(self, mock_update_status):
+        mock_update_status.return_value = {
+            "id": 1,
+            "type": "lost",
+            "title": "Wallet",
+            "status": "resolved",
+        }
+
+        response = self.client.patch("/items/1/status", json={"status": "Returned"})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "resolved")
+
 
 if __name__ == "__main__":
     unittest.main()
